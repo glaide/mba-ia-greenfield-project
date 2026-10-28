@@ -6,7 +6,7 @@ interface TestDataSourceOptions {
 }
 
 export function createTestDataSource(
-  entities: (Function | string | EntitySchema<any>)[],
+  entities: (string | EntitySchema | (new (...args: never[]) => unknown))[],
   options: TestDataSourceOptions = {},
 ): DataSource {
   const { synchronize = true, migrations } = options;
@@ -24,8 +24,22 @@ export function createTestDataSource(
 }
 
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
-  await dataSource.query('DELETE FROM "refresh_tokens"');
-  await dataSource.query('DELETE FROM "verification_tokens"');
-  await dataSource.query('DELETE FROM "channels"');
-  await dataSource.query('DELETE FROM "users"');
+  const tables = await dataSource.query<{ table_name: string }[]>(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = ANY($1::text[])`,
+    [['videos', 'refresh_tokens', 'verification_tokens', 'channels', 'users']],
+  );
+  const existing = new Set(tables.map((t) => t.table_name));
+  for (const table of [
+    'videos',
+    'refresh_tokens',
+    'verification_tokens',
+    'channels',
+    'users',
+  ]) {
+    if (existing.has(table)) {
+      await dataSource.query(`DELETE FROM "${table}"`);
+    }
+  }
 }
