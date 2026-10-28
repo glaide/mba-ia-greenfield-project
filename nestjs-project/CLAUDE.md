@@ -13,8 +13,10 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **Object storage (`minio`):** LocalStack health on port `4566` (S3-compatible; service name remains `minio`)
 
-Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
+Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment". The video worker is a separate Compose service (`video-worker`).
 
 ## Development Environment
 
@@ -29,11 +31,18 @@ docker compose exec nestjs-api npm install
 
 # Run the dev server (watch mode)
 docker compose exec nestjs-api npm run start:dev
+
+# Video worker (also started by compose as video-worker)
+docker compose logs -f video-worker
 ```
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
+- `video-worker` — BullMQ consumer + FFmpeg/ffprobe (no HTTP)
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP `1025`, UI `8025`
+- `minio` — S3-compatible storage (LocalStack) on `4566`
+- `redis` — BullMQ broker on `6379`
 
 All verification and teardown commands run on the **host machine**:
 
@@ -60,8 +69,10 @@ docker compose down
 
 ```bash
 npm run start:dev                        # Dev server with hot-reload
+npm run start:worker:dev                 # Video worker (ts-node); prefer Compose service
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
+npm run start:worker                     # Compiled worker (`node dist/worker`)
 
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
@@ -148,6 +159,22 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+- Cross-cutting: `StorageModule` (S3 client), `QueueModule` (BullMQ); worker boots `WorkerModule` via `src/worker.ts`
+
+## Videos module
+
+- **Paths:** `src/videos/`, `src/storage/`, `src/queue/`
+- **Entity:** `Video` → `channels` (many-to-one); unique `slug`; status enum `draft|processing|ready|failed`
+- **Endpoints:**
+  - `POST /videos/upload/init` — auth; draft + multipart + presigned part URLs (max 10GB)
+  - `POST /videos/:id/upload/parts` — auth + owner; more presigned parts
+  - `POST /videos/:id/upload/complete` — auth + owner; complete multipart → enqueue → `processing`
+  - `GET /videos/:slug` — public metadata when `ready` (owners may see non-ready)
+  - `GET /videos/:slug/stream` — public Range/206 proxy from object storage
+  - `GET /videos/:slug/download` — public attachment download when `ready`
+- **Queue:** BullMQ queue `video-processing`, job `process-video`, payload `{ videoId }`
+- **Worker:** `video-worker` Compose service runs FFmpeg/ffprobe, writes thumbnail, sets `ready`/`failed`
+- **Env:** `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `REDIS_HOST`, `REDIS_PORT` (hosts = Compose service names)
 
 ## Code Conventions
 

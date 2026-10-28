@@ -10,21 +10,32 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
-- `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Modules: auth, users, channels, videos, storage, queue, mail, common, config, database, swagger.
+- `docs/` — Project documentation, architecture diagrams, and planning (incl. `docs/phases/phase-03-videos/`).
+- `next-frontend/` (Next.js) — auth UI present; video UI out of scope for Fase 03.
 
 ## Architecture (C4 Container Diagram)
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
 - **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
-- **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
-- **Email Service** (SMTP) → account confirmation and password recovery
+- **API** (Nest.js) → business rules, auth, reads/writes DB, issues S3 uploads, publishes jobs to queue, sends emails
+- **Video Worker** (FFmpeg) → Nest application context consuming BullMQ jobs; extracts metadata/thumbnail
+- **Database** (PostgreSQL) → users, channels, videos, auth tokens
+- **Object Storage** (S3-compatible) → video files and thumbnails (Compose service `minio`; LocalStack in local Docker when MinIO image is unavailable)
+- **Message Queue** (Redis + BullMQ) → queue name `video-processing`, job `process-video`
+- **Email Service** (SMTP / Mailpit) → account confirmation and password recovery
+
+## Videos (Fase 03)
+
+Backend delivery (no video UI in this phase):
+
+- **Status cycle:** `draft` → `processing` → `ready` | `failed`
+- **Upload:** `POST /videos/upload/init` creates draft + S3 multipart; client PUTs parts to storage; `POST /videos/:id/upload/complete` completes and enqueues processing
+- **Metadata:** `GET /videos/:slug` (public when `ready`)
+- **Playback:** `GET /videos/:slug/stream` (HTTP Range / 206) and `GET /videos/:slug/download`
+- **Unique URL:** opaque slug on `videos.slug` (unique)
+- **Worker:** Compose service `video-worker` (`npm run start:worker:dev`)
 
 ## Docker Networking
 
