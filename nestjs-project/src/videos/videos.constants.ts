@@ -1,0 +1,3 @@
+export const MAX_VIDEO_SIZE_BYTES = 10 * 1024 * 1024 * 1024; // 10GB
+export const VIDEO_SLUG_LENGTH = 12;
+export const DEFAULT_PART_SIZE_BYTES = 64 * 1024 * 1024; // 64MB
